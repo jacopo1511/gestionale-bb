@@ -1,0 +1,6 @@
+# Fine riga normalizzata a LF nel repo (evita script rotti dentro il container)
+* text=auto eol=lf
+*.sh text eol=lf
+*.png binary
+*.jpg binary
+*.ico binary

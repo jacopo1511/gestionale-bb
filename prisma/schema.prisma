@@ -1,0 +1,305 @@
+// Gestionale B&B / Affittacamere — schema dati
+// Fase 1: modello completo. Le tabelle di riferimento (Comune, Country, DocumentKind)
+// vengono popolate nella Fase 4 dai file ufficiali dei portali.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Utente del pannello (accesso singolo per il gestore)
+// ─────────────────────────────────────────────────────────────
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────
+// Struttura ricettiva (il B&B e l'affittacamere)
+// ─────────────────────────────────────────────────────────────
+enum PropertyKind {
+  BED_AND_BREAKFAST
+  AFFITTACAMERE
+}
+
+model Property {
+  id   String       @id @default(cuid())
+  name String
+  kind PropertyKind
+
+  // Indirizzo
+  address     String?
+  comuneCode  String? // codice ISTAT del comune
+  comuneName  String?
+  province    String? // sigla provincia (es. AN)
+  cap         String?
+
+  // Credenziali Alloggiati Web (Polizia di Stato) — cifrate a riposo
+  alloggiatiUsernameEnc String?
+  alloggiatiPasswordEnc String?
+  alloggiatiWsKeyEnc    String?
+
+  // Credenziali Ross1000 Regione Marche — cifrate a riposo
+  ross1000UsernameEnc   String?
+  ross1000PasswordEnc   String?
+  ross1000StructureCode String? // codice struttura assegnato dalla Regione
+  ross1000Endpoint      String? // URL web service (override, altrimenti default Marche)
+
+  // Impostazioni
+  docRetentionDays Int @default(7) // giorni di conservazione immagini documento dopo il check-in
+
+  rooms       Room[]
+  stays       Stay[]
+  submissions Submission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Room {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  name     String
+  roomType String? // es. matrimoniale, doppia, singola, tripla
+  beds     Int     @default(2)
+
+  stays Stay[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([propertyId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Soggiorno / prenotazione
+// ─────────────────────────────────────────────────────────────
+enum StayStatus {
+  DRAFT
+  CONFIRMED
+  CHECKED_IN
+  DEPARTED
+  CANCELLED
+}
+
+enum SubmissionStatus {
+  PENDING
+  SENT
+  FAILED
+  NOT_REQUIRED
+}
+
+model Stay {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  roomId     String?
+  room       Room?    @relation(fields: [roomId], references: [id], onDelete: SetNull)
+
+  arrivalDate   DateTime // solo la data conta
+  departureDate DateTime
+  channel       String     @default("DIRETTO") // DIRETTO, BOOKING, AIRBNB, ...
+  externalRef   String? // id prenotazione del canale
+  status        StayStatus @default(DRAFT)
+  notes         String?
+
+  // Stato invii verso i portali
+  alloggiatiStatus SubmissionStatus @default(PENDING)
+  ross1000Status   SubmissionStatus @default(PENDING)
+
+  guests      Guest[]
+  checkinLink CheckinLink?
+  submissions Submission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([propertyId, arrivalDate])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Ospite
+// ─────────────────────────────────────────────────────────────
+enum GuestRole {
+  SINGOLO         // 16 - ospite singolo
+  CAPOFAMIGLIA    // 17
+  CAPOGRUPPO      // 18
+  OSPITE_FAMIGLIA // 19
+  OSPITE_GRUPPO   // 20
+}
+
+enum Sex {
+  M
+  F
+}
+
+model Guest {
+  id      String @id @default(cuid())
+  stayId  String
+  stay    Stay   @relation(fields: [stayId], references: [id], onDelete: Cascade)
+  isLead  Boolean   @default(false)
+  role    GuestRole @default(SINGOLO)
+
+  // Anagrafica
+  lastName  String
+  firstName String
+  sex       Sex
+  birthDate DateTime
+
+  // Nascita
+  birthComuneCode  String? // codice comune ISTAT (se nato in Italia)
+  birthComuneName  String?
+  birthProvince    String?
+  birthCountryCode String? // codice stato (se nato all'estero)
+
+  citizenshipCountryCode String? // cittadinanza
+
+  // Residenza (utile per la statistica Ross1000)
+  residenceCountryCode String?
+  residenceComuneCode  String?
+  residenceComuneName  String?
+  residenceProvince    String?
+
+  // Documento — obbligatorio solo per SINGOLO / CAPOFAMIGLIA / CAPOGRUPPO
+  documentType            String? // codice tipo documento (tabella DocumentKind)
+  documentNumber          String?
+  documentIssuePlaceCode  String?
+  documentIssuePlaceName  String?
+  documentIssueCountryCode String?
+
+  images IdDocumentImage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([stayId])
+}
+
+enum DocumentSide {
+  FRONT
+  BACK
+  SINGLE
+}
+
+model IdDocumentImage {
+  id      String @id @default(cuid())
+  guestId String
+  guest   Guest  @relation(fields: [guestId], references: [id], onDelete: Cascade)
+
+  side       DocumentSide @default(SINGLE)
+  storageKey String // percorso/chiave del file cifrato
+  mimeType   String
+  sizeBytes  Int
+  sha256     String // hash del contenuto in chiaro, per integrità
+
+  capturedAt DateTime  @default(now())
+  deleteAfter DateTime // data oltre la quale il job di retention elimina il file
+  deletedAt  DateTime?
+
+  @@index([guestId])
+  @@index([deleteAfter, deletedAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Link di autoregistrazione per l'ospite
+// ─────────────────────────────────────────────────────────────
+enum CheckinLinkStatus {
+  SENT
+  OPENED
+  SUBMITTED
+  CONFIRMED
+  EXPIRED
+  REVOKED
+}
+
+model CheckinLink {
+  id     String @id @default(cuid())
+  stayId String @unique
+  stay   Stay   @relation(fields: [stayId], references: [id], onDelete: Cascade)
+
+  token     String            @unique // token casuale nell'URL consegnato all'ospite
+  status    CheckinLinkStatus @default(SENT)
+  expiresAt DateTime
+
+  createdAt   DateTime  @default(now())
+  openedAt    DateTime?
+  submittedAt DateTime?
+  confirmedAt DateTime?
+  revokedAt   DateTime?
+}
+
+// ─────────────────────────────────────────────────────────────
+// Audit degli invii verso i portali
+// ─────────────────────────────────────────────────────────────
+enum SubmissionTarget {
+  ALLOGGIATI
+  ROSS1000
+}
+
+model Submission {
+  id         String   @id @default(cuid())
+  stayId     String?
+  stay       Stay?    @relation(fields: [stayId], references: [id], onDelete: SetNull)
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  target SubmissionTarget
+  status SubmissionStatus @default(PENDING)
+
+  // Per Ross1000: periodo del movimento trasmesso
+  periodStart DateTime?
+  periodEnd   DateTime?
+
+  requestPayload  String? @db.Text
+  responsePayload String? @db.Text
+  receiptRef      String? // protocollo / id ricevuta
+  error           String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([propertyId, target, createdAt])
+  @@index([stayId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tabelle di riferimento (popolate in Fase 4)
+// ─────────────────────────────────────────────────────────────
+model Comune {
+  istatCode     String  @id // codice ISTAT
+  name          String
+  province      String
+  cadastralCode String? // codice Belfiore / catastale
+  region        String?
+  active        Boolean @default(true)
+
+  @@index([name])
+}
+
+model Country {
+  code   String  @id // codice "stato" usato dai portali
+  name   String
+  iso3   String?
+  active Boolean @default(true)
+
+  @@index([name])
+}
+
+model DocumentKind {
+  code              String  @id
+  description       String
+  requiresIssuePlace Boolean @default(true)
+  active            Boolean @default(true)
+}
