@@ -5,7 +5,9 @@ FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
-RUN npm ci
+# serve prima di "npm ci" perche' lo script postinstall lancia "prisma generate"
+COPY prisma ./prisma
+RUN DATABASE_URL="postgresql://build:build@localhost:5432/build?schema=public" npm ci
 
 # ─── builder: genera Prisma Client e builda Next (standalone) ─
 FROM node:22-bookworm-slim AS builder
@@ -14,8 +16,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npx prisma generate
-RUN npm run build
+# Valori fittizi usati SOLO in fase di build (a runtime li passa "docker run -e ...").
+ARG BUILD_DATABASE_URL="postgresql://build:build@localhost:5432/build?schema=public"
+ARG BUILD_APP_SECRET="build-time-placeholder-not-used-at-runtime-0000000000"
+RUN DATABASE_URL="$BUILD_DATABASE_URL" APP_SECRET="$BUILD_APP_SECRET" npx prisma generate
+RUN DATABASE_URL="$BUILD_DATABASE_URL" APP_SECRET="$BUILD_APP_SECRET" APP_BASE_URL="http://localhost:3000" npm run build
 
 # ─── runner: immagine finale minimale ───────────────────────
 FROM node:22-bookworm-slim AS runner
@@ -35,7 +40,6 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/scripts ./scripts
