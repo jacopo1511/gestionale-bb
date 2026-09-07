@@ -8,6 +8,9 @@ import { prisma } from "./db";
 
 const COOKIE = "gb_session";
 const MAX_AGE = 60 * 60 * 24 * 7; // 7 giorni
+// Cookie "Secure" solo se l'app è servita via HTTPS (es. dietro Cloudflare).
+// In LAN su http:// deve restare non-Secure o il browser lo scarta.
+const SECURE_COOKIE = env.APP_BASE_URL.startsWith("https://");
 
 const sessionKey = new Uint8Array(
   crypto.hkdfSync("sha256", Buffer.from(env.APP_SECRET, "utf8"), Buffer.alloc(0), "gestionale:session:v1", 32),
@@ -32,7 +35,7 @@ export async function createSession(userId: string): Promise<void> {
   const jar = await cookies();
   jar.set(COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: SECURE_COOKIE,
     sameSite: "lax",
     path: "/",
     maxAge: MAX_AGE,

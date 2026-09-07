@@ -1,6 +1,9 @@
 @import "tailwindcss";
 
+/* Tema chiaro forzato: l'interfaccia è disegnata per sfondo chiaro.
+   Niente switch automatico su prefers-color-scheme. */
 :root {
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #171717;
 }
@@ -12,15 +15,20 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--background);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* I campi restano leggibili anche con SO in modalità scura */
+input,
+select,
+textarea,
+button {
+  color-scheme: light;
 }
