@@ -32,14 +32,13 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
 # Output standalone di Next.js
+COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
 
-# Prisma: CLI + client generato + engine, per eseguire "migrate deploy" all'avvio
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+# node_modules completo: la CLI Prisma (per "migrate deploy" all'avvio) ha
+# molte dipendenze hoistate che la copia selezionata non prendeva.
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/scripts ./scripts
